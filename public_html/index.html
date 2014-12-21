@@ -1,0 +1,304 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset= utf8" />
+<title>Математическая симуляция &laquo;Жизнь&raquo;</title>
+<style type="text/css">
+<!--
+.CellTable { background-color:#CCCCCC;}
+.CellTable td { margin: 0px; padding: 0px; height: 16px; width: 16px; background-color:#FFFFFF;}
+#World { display:none; }
+#WorldPars { display:none; }
+h1 { font-size: 120%; margin:0 0 0 15pt;}
+fieldset { padding:5pt; }
+-->
+</style>
+<script type="text/javascript">
+var nCol = 10, nRow = 10, bCalc = false, nTick = 2000, nPop = 0, bIsTor = false;
+var CellTable = null, imgs = null, aCells = null, divWorld = null, divWPars = null, botStart = null, oPop = null, position_url = null;
+window.onload=function(){
+	CellTable = document.getElementById('CellTable');
+	oPop = document.getElementById('nPop');
+	divWorld = document.getElementById('World');
+	divPars = document.getElementById('Pars');
+	divWPars = document.getElementById('WorldPars');
+	botStart = document.getElementById('Start');
+	position_url = document.getElementById('this_url');
+        columnss=document.getElementById('col');
+        //document.getElementById('col').onkeyup=intform(event);
+	checkPars();
+}
+function intform(e){
+            if(e.keyCode == 13){
+               Init(this.form);
+            }
+}
+function checkPars(){
+	var error = 'Данные параметров URL некорректны, установки не произведены';
+	if(typeof window.location.search == 'undefined' || window.location.search.charAt(0)!='?' || window.location.search.length<2) return;
+	var qs = window.location.search.substr(1);
+	var pairs = qs.split('&');
+	var pars = {};
+	for(var i=0; i<pairs.length; i++){
+		if(pairs[i] == '') continue;
+		var par = pairs[i].split('=');
+		pars[par[0]] = par.length < 2 ? '': par[1];
+	}
+	var f = document.forms['form0'];
+	if(typeof pars['r'] == 'undefined' || pars['r'].match(/^\d+$/) == null){ alert(error); return; }
+	var nRow = parseInt(pars['r'], 10);
+	if(nRow<10) { alert(error); return; }
+	if(typeof pars['c'] == 'undefined' || pars['c'].match(/^\d+$/) == null) { alert(error); return; }
+	var nCol = parseInt(pars['c'], 10);
+	if(nCol<10) { alert(error); return; }
+	if(typeof pars['d'] == 'undefined' || pars['d'].match(/^[a-f\d]+$/i) == null) { alert(error); return; }
+	if((pars['d'].length % 2) != 0) { alert(error); return; }
+	var nBytes = pars['d'].length / 2;
+	var nCell = nCol*nRow;
+	var testNBytes = Math.ceil( nCell / 8);
+	if(testNBytes!=nBytes) { alert(error); return; }
+	f.nCols.value = nCol;
+	f.nRows.value = nRow;
+	aCells = [];
+	for(var i=0, j=0; i<nBytes; i++){
+		var n = parseInt(pars['d'].substr(i*2, 2), 16);
+		for(var b=0; b<8; b++, j++) aCells[j] = (n & (1 << b)) != 0;
+	}
+	f.random.checked = false;
+	f.tor.checked = (typeof pars['t'] != 'undefined') && (pars['t']='1');
+	if(typeof pars['i'] == 'undefined') f.Interval.value = '2';
+	else{
+		nTick = parseInt(pars['i'], 10);
+		if(nTick<1) nTick = 2;
+		f.Interval.value = nTick;
+	}
+	Init(f, true);
+}
+function Init(f, full){
+	var fRandom = true;
+	if(typeof full == 'undefined') full = false;
+	if(!f){ nCol = 10; nRow = 10; }
+	else{
+		nCol = parseInt(f.nCols.value);
+		nRow = parseInt(f.nRows.value);
+		nTick = parseInt(f.Interval.value);
+		if(isNaN(nCol)){ alert('Укажите число!'); f.nCols.focus(); return; }
+		if(isNaN(nRow)){ alert('Укажите число!'); f.nRows.focus(); return;  }
+		if(nCol<10){ alert('Укажите число не меньше 10!'); f.nCols.focus(); return; }
+		if(nRow<10){ alert('Укажите число не меньше 10!'); f.nRows.focus(); return; }
+		if(isNaN(nTick)){ alert('Укажите число!'); f.Interval.focus(); return;  }
+		if(nTick<1){ alert('Укажите число не менее 1 сек!'); f.Interval.focus(); return;  }
+		nTick *= 1000;
+		fRandom = f.random.checked;
+		bIsTor = f.tor.checked;
+	}
+	bCalc = false;
+	nPop = 0;
+	oPop.innerHTML = nPop;
+	imgs = new Array();
+	if(!full) aCells = new Array();
+	RemoveAllChild(CellTable);
+	var fIsLife;
+	for(var y=0, ii=0; y<nRow; y++){
+		var tr = document.createElement('TR');
+		for(var x=0; x<nCol; x++, ii++){
+			var td = document.createElement('TD');
+			if(full) fIsLife = aCells[ii];
+			else aCells[ii] = fIsLife = fRandom && Math.random()>0.5;
+			var src = fIsLife ? 'life.gif' : 'empty.gif';
+			imgs[ii] = getImg(src);
+			imgs[ii].id = ii+'cell';
+			td.appendChild(imgs[ii]);
+			tr.appendChild(td);
+		}
+		CellTable.appendChild(tr);
+	}
+	divWorld.style.display='block';
+	divWPars.style.display='block';
+	divPars.style.display='none';
+	ShowLink();
+}
+function ShowPars(){
+	bCalc = false;
+	botStart.value = bCalc ? 'Стоп' : 'Начать генерацию';
+	divWorld.style.display='none';
+	divWPars.style.display='none';
+	divPars.style.display='block';
+}
+
+function DoTick(){
+	if(!bCalc) return;
+	var f = new Array();
+	for(var i=0; i<aCells.length; i++){
+		var n = CalcLife(i);
+		if(aCells[i]) f[i] = n==2 || n==3;
+		else f[i] = n==3;
+	}
+	aCells = f;
+	ReDraw();
+}
+var arr = [ ];
+function ReDraw(){
+	var n = 0;
+        var k = 0;
+	nPop++;
+	oPop.innerHTML = nPop;
+	for(var i=0; i<imgs.length; i++){
+		imgs[i].src = aCells[i]? 'life.gif' : 'empty.gif';
+		if(aCells[i]) n++;
+	}
+	if(n>0) {
+            var data = [];
+            for(var i=0; i < aCells.length; i++){
+                    var iByte = Math.floor(i/8);
+                    if(iByte == data.length) data[iByte] = 0;
+                    if(aCells[i]) data[iByte] += (1 << (i%8));
+            }
+            var str = '';
+            for(var i=0; i < data.length; i++) str += dechex(data[i]);
+            if (arr.length===0)
+                arr.push(str);
+            else {
+                for(var i=0; i < arr.length; i++) 
+                    if (str===arr[i]) {
+                            alert("Цивилизация повторилась");
+                            bCalc = false; 
+                            botStart.value = 'Начать генерацию';
+                        }
+                arr.push(str);
+                }
+                    
+            window.setTimeout(DoTick, nTick);
+        }
+	else{
+		alert('Цивилизация вымерла');
+		bCalc = false;
+		botStart.value = 'Начать генерацию';
+	}
+}
+function CalcLife(i){
+	if(bIsTor) return CalcLife2(i);
+	var y = Math.floor(i/nCol);
+	var x = i % nRow;
+	var n = 0;
+	var fX = x<(nCol-1);
+	if(y>0){
+		if(isLife(x,y-1)) n++;
+		if(x>0 && isLife(x-1,y-1)) n++;
+		if(fX && isLife(x+1,y-1)) n++;
+	}
+	if(x>0 && isLife(x-1,y)) n++;
+	if(fX && isLife(x+1,y)) n++;
+	if(y<(nRow-1)){
+		if(isLife(x,y+1)) n++;
+		if(x>0 && isLife(x-1,y+1)) n++;
+		if(fX && isLife(x+1,y+1)) n++;
+	}
+	return n;
+}
+function CalcLife2(i){
+	var y = Math.floor(i/nCol);
+	var x = i % nCol;
+	var n = 0;
+	var tx;
+	var ty1=y-1;
+	var ty2=y+1
+	if(ty1<0) ty1=nRow-1;
+	if(ty2>=nRow) ty2=0;
+		if(isLife(x,ty1)) n++;
+		if(isLife(x,ty2)) n++;
+	if((tx=x-1)<0) tx=nCol-1;
+		if(isLife(tx,ty1)) n++;
+		if(isLife(tx,ty2)) n++;
+		if(isLife(tx,y)) n++;
+	if((tx=x+1)>=nCol) tx=0;
+		if(isLife(tx,ty1)) n++;
+		if(isLife(tx,ty2)) n++;
+		if(isLife(tx,y)) n++;
+	return n;
+}
+function isLife(x, y){ return aCells[y*nCol+x]; }
+function RemoveAllChild(obj){ while(typeof(obj.childNodes)=='object' && obj.childNodes.length>0) obj.removeChild(obj.childNodes[0]); }
+function getImg(osrc){
+	var img;
+	with(img= document.createElement('IMG')){ src = !osrc ? 'life.gif' : osrc; width=16; height=16; }
+	img.onclick = function(){
+		if(bCalc) return;
+		var isLife = this.src.match(/life\.gif/)!==null;
+		this.src =  isLife ? 'empty.gif' : 'life.gif';
+		if(typeof(this.id)!='undefined' && this.id!=''){
+			var i = parseInt(this.id);
+			aCells[i]=!isLife;
+		}
+		nPop=0;
+		ShowLink();
+	}
+	return img;
+}
+function DoStart(){
+	bCalc = !bCalc;
+	botStart.value = bCalc ? 'Стоп' : 'Начать генерацию';
+	window.setTimeout(DoTick, nTick);
+}
+function ShowLink(){
+	if(!position_url) return;
+	var url = window.location.pathname;
+	var qs = ['t='+(bIsTor?1:0).toString(), 'i='+(nTick/1000), 'r='+nRow.toString(),'c='+nCol.toString()];
+	var data = [];
+	for(var i=0; i < aCells.length; i++){
+		var iByte = Math.floor(i/8);
+		if(iByte == data.length) data[iByte] = 0;
+		if(aCells[i]) data[iByte] += (1 << (i%8));
+	}
+	var str = '';
+	for(var i=0; i < data.length; i++) str += dechex(data[i]);
+	qs.push('d='+str);
+	position_url.href = url+'?'+qs.join('&');
+}
+function dechex(n){
+	var str = n.toString(16);
+	if(str.length < 2) str = '0'+str;
+	return str;
+}
+</script>
+</head>
+<body>
+<h1>Математический симулятор &laquo;Жизнь&raquo;</h1>
+<table border="0" cellspacing="10" cellpadding="0">
+<tr valign="top">
+<td style="width:250pt;">
+<fieldset id="Pars">
+<legend>Параметры мира </legend>
+<form name="form0">
+<p>
+    <input type="text" id ="col" name="nCols" onkeyup="intform(event)" value="10" size="3" /> колонок 
+<input type="text" name="nRows" onkeyup="intform(event)" value="10" size="3" /> рядов<br />
+<input type="checkbox" name="random" value="1" /> заполнить мир случайно<br />
+<input type="checkbox" name="tor" value="0" style="display:none;" /> <br />
+<input type="text" name="Interval" onkeyup="intform(event)" value="1" size="3" /> период обновления, сек
+</p>
+<p><input type="button" onclick="Init(this.form)" value="Построить" /></p>
+</form>
+</fieldset>
+<fieldset id="WorldPars">
+<legend>Операции и статус</legend>
+<form>
+<input type="button" onclick="DoStart()" value="Начать генерацию" id="Start" />
+<input type="button" onclick="ShowPars()" value="Настроить мир" />
+</form>
+<p>Популяция №<span id="nPop">0</span></p>
+<p><small>Для изменения популяции кликайте на поле мира мышкой</small></p>
+<p><small><a href="#" id="this_url">Ссылка на текущую начальную популяцию</a></small></p>
+</fieldset>
+</td>
+<td>
+<div id="World">
+<table border="1" cellspacing="1" cellpadding="0" class="CellTable">
+<tbody id="CellTable">
+</tbody>
+</table>
+</div>
+</td>
+</tr>
+</table>
+</body>
+</html>
